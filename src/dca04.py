@@ -24,6 +24,10 @@ def features(df):
     df['dq_dt'] = df['BORE_OIL_VOL'].diff() / df['t'].diff()
     #logq
     df['logq'] = np.log(df['BORE_OIL_VOL'].replace(0, np.nan))
+    #lagged features only from previous time steps to avoid leakage
+    df['q_lag1'] = df['BORE_OIL_VOL'].shift(1)
+    df['q_lag2'] = df['BORE_OIL_VOL'].shift(2)
+    df['q_lag3'] = df['BORE_OIL_VOL'].shift(3)
     # Replace zeros to avoid log/ratio issues
     df['q'] = df['BORE_OIL_VOL'].replace(0, np.nan)
     return df
@@ -49,7 +53,8 @@ def main():
         raise ValueError('Not enough valid non-NaN rows after cleaning to train the model.')
     
     feature_cols = ['t', '1/logq', 'q_rolling_mean',
-                    'dq_dt','logq']
+                    'dq_dt','logq',
+                    'q_lag1', 'q_lag2', 'q_lag3']
 
     X = df[feature_cols]
     y = df['q']
