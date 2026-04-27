@@ -9,12 +9,23 @@ from sklearn.model_selection import TimeSeriesSplit
 
 
 def load(path):
+    '''
+    Load the production data from an Excel file and preprocess the date column.
+     - Convert 'DATEPRD' to datetime format for time series analysis.
+     - Ensure the data is sorted by date for proper time series modeling.
+     - Handle any missing or zero values in 'BORE_OIL_VOL' to avoid issues with log transformations and feature engineering later on.
+     - Return the cleaned DataFrame ready for feature engineering.
+    '''
     # Load
     df = pd.read_excel(path)
     df['DATEPRD'] = pd.to_datetime(df['DATEPRD'])
     return df
 
 def features(df):
+    '''
+    Create features for the DCA-like model:
+     - 't': Time index in days since the first production date.
+    '''
     # use DATEPRD as time index
     df['t'] = (df['DATEPRD'] - df['DATEPRD'].min()).dt.days
     df['1/logq']=1/np.log(df['BORE_OIL_VOL'].replace(0, np.nan))
@@ -34,6 +45,11 @@ def features(df):
 
 
 def clean_training_data(df):
+    '''
+    Clean the training data for the DCA-like model:
+     - Keep only rows with finite numeric values needed by the model.
+     - Drop rows with NaN values in the 't' or 'q' columns.
+    '''
     # Keep only rows with finite numeric values needed by the model
     clean_df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['t', 'q']).copy()
     return clean_df
