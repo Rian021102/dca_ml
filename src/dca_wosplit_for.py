@@ -54,6 +54,69 @@ def clean_training_data(df):
     clean_df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=['t', 'q']).copy()
     return clean_df
 
+
+def forecast_future(rf, df, feature_cols, forecast_steps=30):
+    '''
+    Forecast future q values iteratively using lag-based features.
+    '''
+    if forecast_steps <= 0:
+        return pd.DataFrame(columns=['DATEPRD', 'forecast_q'])
+
+    # Use a robust step size from historical dates.
+    day_diffs = df['DATEPRD'].diff().dropna().dt.days
+    step_days = int(day_diffs.median()) if not day_diffs.empty else 1
+    if step_days <= 0:
+        step_days = 1
+
+    last_date = df['DATEPRD'].iloc[-1]
+    last_t = int(df['t'].iloc[-1])
+    q_lag1 = float(df['q'].iloc[-1])
+    q_lag2 = float(df['q'].iloc[-2])
+    q_lag3 = float(df['q'].iloc[-3])
+
+    future_dates = []
+    future_preds = []
+
+    for step in range(1, forecast_steps + 1):
+        next_t = last_t + step_days
+        q_roll = np.mean([q_lag1, q_lag2, q_lag3])
+        dq_dt = (q_lag1 - q_lag2) / step_days
+
+        # Approximate log-based terms from latest known/predicted rate.
+        safe_q = max(q_lag1, 1e-6)
+        logq = np.log(safe_q)
+        inv_logq = 1.0 / logq if abs(logq) > 1e-12 else np.nan
+
+        x_next = pd.DataFrame([
+            {
+                't': next_t,
+                '1/logq': inv_logq,
+                'q_rolling_mean': q_roll,
+                'dq_dt': dq_dt,
+                'logq': logq,
+                'q_lag1': q_lag1,
+                'q_lag2': q_lag2,
+                'q_lag3': q_lag3,
+            }
+        ])[feature_cols]
+
+        # Keep feature vector finite for inference.
+        x_next = x_next.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        q_next = float(rf.predict(x_next)[0])
+        q_next = max(q_next, 0.0)
+
+        next_date = last_date + pd.Timedelta(days=step_days * step)
+        future_dates.append(next_date)
+        future_preds.append(q_next)
+
+        # Roll lags for next step.
+        q_lag3 = q_lag2
+        q_lag2 = q_lag1
+        q_lag1 = q_next
+        last_t = next_t
+
+    return pd.DataFrame({'DATEPRD': future_dates, 'forecast_q': future_preds})
+
 def main():
     path='/home/rian/python_project/myvenv/dca_ml/data/Volve production data.xlsx'
     df = load(path)
@@ -75,19 +138,16 @@ def main():
     X = df[feature_cols]
     y = df['q']
     dates = df['DATEPRD']
-    # Split
-    split = int(len(df) * 0.8)
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y.iloc[:split], y.iloc[split:]
-    # Train with walk-forward cross-validation on the training window
-    tscv = TimeSeriesSplit(n_splits=5)
+    # Train with walk-forward cross-validation on the full history
+    n_splits = min(5, len(X) - 1)
+    tscv = TimeSeriesSplit(n_splits=n_splits)
     cv_mse_scores = []
     cv_mae_scores = []
     cv_r2_scores = []
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train), start=1):
-        X_fold_train, X_fold_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-        y_fold_train, y_fold_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
+    for fold, (train_idx, val_idx) in enumerate(tscv.split(X), start=1):
+        X_fold_train, X_fold_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_fold_train, y_fold_val = y.iloc[train_idx], y.iloc[val_idx]
 
         fold_model = RandomForestRegressor(n_estimators=150, max_depth=8, random_state=42)
         fold_model.fit(X_fold_train, y_fold_train)
@@ -109,38 +169,54 @@ def main():
         f'R2: {np.mean(cv_r2_scores):.4f}'
     )
 
-    # Final model fit on the full train window
+    # Final model fit on the full available history
     rf = RandomForestRegressor(n_estimators=150, max_depth=8, random_state=42)
-    rf.fit(X_train, y_train)
-    # Predict
-    y_pred_train = rf.predict(X_train)
-    y_pred_test = rf.predict(X_test)
-    y_pred = y_pred_test
-    # Evaluate
-    mse = mean_squared_error(y_test, y_pred)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    print(f'MSE: {mse:.2f}, MAE: {mae:.2f}, R2: {r2:.4f}')
+    rf.fit(X, y)
+    y_fitted = rf.predict(X)
+
+    # In-sample fit metrics (no train/test split requested)
+    mse = mean_squared_error(y, y_fitted)
+    mae = mean_absolute_error(y, y_fitted)
+    r2 = r2_score(y, y_fitted)
+    print(f'In-sample fit -> MSE: {mse:.2f}, MAE: {mae:.2f}, R2: {r2:.4f}')
+
+    forecast_steps = 30
+    forecast_df = forecast_future(rf, df, feature_cols, forecast_steps=forecast_steps)
+    print(f'Forecast generated for {forecast_steps} future steps.')
+    print(forecast_df.head(10))
+
     # Plot
     plt.figure(figsize=(12,6))
-    plt.scatter(dates[:split], y_train, label='Train Actual', s=28, color='tab:blue')
-    plt.scatter(dates[split:], y_test, label='Test Actual', s=28, color='tab:orange')
-    plt.plot(dates[split:], y_pred_test, label='Test Pred', linewidth=2, color='tab:green')
-    plt.title("DCA-like Random Forest (Leakage Fixed)")
+    plt.scatter(dates, y, label='Actual', s=24, color='tab:blue')
+    plt.plot(dates, y_fitted, label='Fitted', linewidth=2, color='tab:green')
+    if not forecast_df.empty:
+        plt.plot(
+            forecast_df['DATEPRD'],
+            forecast_df['forecast_q'],
+            label='Forecast',
+            linewidth=2,
+            linestyle='--',
+            color='tab:red'
+        )
+    plt.title('DCA-like Random Forest (Full Training + Forecast)')
     plt.legend()
     plt.xticks(rotation=45)
     plt.tight_layout()
 
     output_dir = Path('/home/rian/python_project/myvenv/dca_ml/Images')
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_file = output_dir / 'dca04_actual_vs_predicted.png'
+    output_file = output_dir / 'dca04_actual_fitted_forecast.png'
     plt.savefig(output_file, dpi=150)
+
+    forecast_file = output_dir / 'dca04_forecast_values.csv'
+    forecast_df.to_csv(forecast_file, index=False)
 
     # Show only when running with an interactive backend.
     if 'agg' not in matplotlib.get_backend().lower():
         plt.show()
     plt.close()
     print(f'Plot saved to: {output_file}')
+    print(f'Forecast values saved to: {forecast_file}')
 
     # Feature importance
     imp = pd.DataFrame({

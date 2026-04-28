@@ -50,13 +50,17 @@ def main():
     feature_cols = ['t', '1/logq', 'q_rolling_mean',
                     'dq_dt','logq']
 
-    X = df[feature_cols]
-    y = df['q']
+    # X = df[feature_cols]
+    # y = df['q']
     dates = df['DATEPRD']
     # Split
     split = int(len(df) * 0.8)
-    X_train, X_test = X.iloc[:split], X.iloc[split:]
-    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    X_train, X_test = df.iloc[:split], df.iloc[split:]
+    y_train, y_test = df['q'].iloc[:split], df['q'].iloc[split:]
+    X_train = X_train[feature_cols]
+    X_test = X_test[feature_cols]
+   
+
     # Train
     rf = RandomForestRegressor(n_estimators=150, max_depth=8, random_state=42)
     rf.fit(X_train, y_train)
