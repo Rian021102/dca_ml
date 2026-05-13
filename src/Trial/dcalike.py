@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 # =====================================================
 # 1. Load same dataset
 # =====================================================
-path = "/home/rian/python_project/myvenv/dca_ml/data/selected_data.csv"
+path = "/home/rian/python_project/myvenv/dca_ml/data/selected_data_02.csv"
 
 df = pd.read_csv(path)
 df["TEST_DATE"] = pd.to_datetime(df["TEST_DATE"])
