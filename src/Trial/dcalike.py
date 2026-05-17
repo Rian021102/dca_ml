@@ -121,7 +121,7 @@ r2 = r2_score(test_actual_q, test_pred_q)
 # =====================================================
 # 6. Recursive Random Forest forecast
 # =====================================================
-forecast_horizon = 100
+forecast_horizon = 1000
 future_q_rf = list(q.copy())
 
 recent_log_declines = np.diff(np.log(np.clip(q[-30:], 1e-6, None)))
