@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 # =====================================================
 # 1. Load same dataset
 # =====================================================
-path = "/home/rian/python_project/myvenv/dca_ml/data/selected_data_02.csv"
+path = "/home/rian/python_project/myvenv/dca_ml/data/test_data.csv"
 
 df = pd.read_csv(path)
 df["TEST_DATE"] = pd.to_datetime(df["TEST_DATE"])
@@ -305,11 +305,11 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
-plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_vs_exponential_arps_overlay.png"
+plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_vs_exponential_arps_overlay_test_data.png"
 plt.savefig(plot_path, dpi=200, bbox_inches="tight")
 
 
-forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_vs_exponential_arps_forecast.csv"
+forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_vs_exponential_arps_forecast_test_data.csv"
 forecast_df.to_csv(forecast_path, index=False)
 
 print(f"\nSaved overlay plot to: {plot_path}")

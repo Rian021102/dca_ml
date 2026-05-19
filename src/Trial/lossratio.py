@@ -8,7 +8,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 # =====================================================
 # 1. Load data
 # =====================================================
-path = "/home/rian/python_project/myvenv/dca_ml/data/selected_data_02.csv"
+path = "/home/rian/python_project/myvenv/dca_ml/data/test_data.csv"
 
 df = pd.read_csv(path)
 df["TEST_DATE"] = pd.to_datetime(df["TEST_DATE"])
@@ -243,11 +243,11 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
-plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_standard_loss_ratio_forecast.png"
+plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_standard_loss_ratio_forecast_test_data.png"
 plt.savefig(plot_path, dpi=200, bbox_inches="tight")
 
 
-forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_standard_loss_ratio_forecast.csv"
+forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_standard_loss_ratio_forecast_test_data.csv"
 forecast_df.to_csv(forecast_path, index=False)
 
 print(f"\nSaved plot to: {plot_path}")
