@@ -60,10 +60,10 @@ def build_features(q_series, idx):
     return features
 
 # =====================================================
-# 3. Build target: standard positive loss ratio
+# 3. Build target: decline rate  D = -(dq/dt) / q
 # =====================================================
 rows = []
-targets_loss_ratio = []
+targets_D = []
 target_indices = []
 
 minimum_history = 30
@@ -74,29 +74,29 @@ for i in range(minimum_history, len(q) - 1):
     dt_days = (df["TEST_DATE"].iloc[i + 1] - df["TEST_DATE"].iloc[i]).days
     dt_days = max(dt_days, 1)
 
-    # Standard loss ratio / decline rate:
+    # Arps decline rate / nominal decline:
     # D = -(dq/dt) / q
     dqdt = (q[i + 1] - q[i]) / dt_days
-    D_loss = -dqdt / q[i]
+    D = -dqdt / q[i]
 
-    targets_loss_ratio.append(D_loss)
+    targets_D.append(D)
     target_indices.append(i + 1)
 
 X = pd.DataFrame(rows)
-y_loss = np.array(targets_loss_ratio)
+y_D = np.array(targets_D)
 target_indices = np.array(target_indices)
 
 split = int(len(X) * 0.8)
 
 X_train = X.iloc[:split]
 X_test = X.iloc[split:]
-y_train = y_loss[:split]
-y_test = y_loss[split:]
+y_train = y_D[:split]
+y_test = y_D[split:]
 
 # =====================================================
 # 4. Train Random Forest
 # =====================================================
-rf_loss = RandomForestRegressor(
+rf_D = RandomForestRegressor(
     n_estimators=120,
     max_depth=8,
     min_samples_leaf=5,
@@ -104,12 +104,21 @@ rf_loss = RandomForestRegressor(
     n_jobs=1
 )
 
-rf_loss.fit(X_train, y_train)
+rf_D.fit(X_train, y_train)
 
 # =====================================================
-# 5. Test prediction
+# 5. Test prediction  --  EXACT exponential form
 # =====================================================
-pred_loss_test = rf_loss.predict(X_test)
+# The underlying Arps ODE is:
+#       dq/dt = -D * q
+# whose exact solution over a step dt (with D held constant) is:
+#       q(t+dt) = q(t) * exp(-D * dt)
+#
+# Previously we used the first-order Euler form  q * (1 - D*dt).
+# The exponential form is the canonical Arps b=0 solution and
+# is strictly positive for any D, so no q clipping is needed.
+
+pred_D_test = rf_D.predict(X_test)
 
 test_current_q = q[target_indices[split:] - 1]
 test_actual_q = q[target_indices[split:]]
@@ -121,16 +130,15 @@ for idx in target_indices[split:]:
 
 test_dt = np.array(test_dt)
 
-# q_next = q_current * (1 - D * dt)
-test_pred_q = test_current_q * (1 - pred_loss_test * test_dt)
-test_pred_q = np.clip(test_pred_q, 1e-6, None)
+# Exact exponential step instead of Euler approximation
+test_pred_q = test_current_q * np.exp(-pred_D_test * test_dt)
 
 mae = mean_absolute_error(test_actual_q, test_pred_q)
 rmse = mean_squared_error(test_actual_q, test_pred_q) ** 0.5
 r2 = r2_score(test_actual_q, test_pred_q)
 
 # =====================================================
-# 6. Recursive forecast
+# 6. Recursive forecast  --  EXACT exponential form
 # =====================================================
 forecast_horizon = 1000
 future_q = list(q.copy())
@@ -159,24 +167,24 @@ for step in range(forecast_horizon):
     X_future = pd.DataFrame([build_features(future_q, idx)])
     X_future = X_future[X.columns]
 
-    predicted_D = float(rf_loss.predict(X_future)[0])
+    predicted_D = float(rf_D.predict(X_future)[0])
 
     # Force decline-only: positive D
     predicted_D = max(predicted_D, 0.0)
 
-    # Blend ML loss ratio with recent terminal loss ratio
+    # Blend ML prediction with recent terminal D
     predicted_D = 0.7 * predicted_D + 0.3 * terminal_D
 
-    # Avoid collapse or flat line
+    # Physical bounds on D (per day)
     predicted_D = np.clip(predicted_D, 1e-5, 0.05)
 
-    # Daily forecast
-    next_q = future_q[-1] * (1 - predicted_D)
-    next_q = max(next_q, 1e-6)
+    # Exact analytical Arps exponential step (dt = 1 day implicit)
+    # q_next = q * exp(-D * dt)   --  strictly positive, no clipping needed
+    next_q = future_q[-1] * np.exp(-predicted_D)
 
     future_q.append(next_q)
 
-loss_forecast = np.array(future_q[-forecast_horizon:])
+D_forecast = np.array(future_q[-forecast_horizon:])
 
 future_dates = pd.date_range(
     start=df["TEST_DATE"].iloc[-1] + pd.Timedelta(days=1),
@@ -186,15 +194,15 @@ future_dates = pd.date_range(
 
 forecast_df = pd.DataFrame({
     "TEST_DATE": future_dates,
-    "RF_STANDARD_LOSS_RATIO_FORECAST_OIL": loss_forecast
+    "RF_DECLINE_RATE_FORECAST_OIL": D_forecast
 })
 
 # =====================================================
 # 7. Print result
 # =====================================================
-print("Random Forest using standard loss ratio target")
-print("Target: D = -(dq/dt) / q")
-print("Decline values are positive.")
+print("Random Forest using Arps decline rate target (exact exponential step)")
+print("Target  : D = -(dq/dt) / q")
+print("Stepping: q_next = q * exp(-D * dt)   [exact Arps b=0 solution]")
 print()
 print("Test performance")
 print(f"MAE  : {mae:.2f}")
@@ -208,9 +216,9 @@ print(f"Recent terminal D  : {terminal_D:.6f} per day")
 
 print("\nForecast summary")
 print(f"Last actual smooth oil : {q[-1]:.2f}")
-print(f"Day-1 forecast         : {loss_forecast[0]:.2f}")
-print(f"Day-{forecast_horizon} forecast       : {loss_forecast[-1]:.2f}")
-print(f"Forecast decline       : {(1 - loss_forecast[-1] / q[-1]) * 100:.2f}%")
+print(f"Day-1 forecast         : {D_forecast[0]:.2f}")
+print(f"Day-{forecast_horizon} forecast       : {D_forecast[-1]:.2f}")
+print(f"Forecast decline       : {(1 - D_forecast[-1] / q[-1]) * 100:.2f}%")
 
 print("\nFirst 10 forecast rows")
 print(forecast_df.head(10))
@@ -224,30 +232,29 @@ plt.figure(figsize=(15, 7))
 
 plt.plot(df["TEST_DATE"], df["OIL"], alpha=0.35, label="Actual Oil")
 plt.plot(df["TEST_DATE"], df["OIL_SMOOTH"], linewidth=2, label="Smoothed Oil / Decline Trend")
-plt.plot(test_dates, test_pred_q, linewidth=2, label="RF Test Prediction: D = -(dq/dt)/q")
+plt.plot(test_dates, test_pred_q, linewidth=2, label="RF Test Prediction (exact exp step)")
 plt.plot(
     forecast_df["TEST_DATE"],
-    forecast_df["RF_STANDARD_LOSS_RATIO_FORECAST_OIL"],
+    forecast_df["RF_DECLINE_RATE_FORECAST_OIL"],
     linewidth=3,
     linestyle="--",
-    label="100-Day RF Forecast: D = -(dq/dt)/q"
+    label=f"{forecast_horizon}-Day RF Forecast (exact exp step)"
 )
 
 plt.axvline(df["TEST_DATE"].iloc[target_indices[split]], linestyle=":", label="Test Start")
 plt.axvline(df["TEST_DATE"].iloc[-1], linestyle=":", label="Forecast Start")
 
-plt.title("Random Forest Forecast using Standard Loss Ratio Target: D = -(dq/dt)/q")
+plt.title("RF Forecast — Arps Decline Rate D with Exact Exponential Integration")
 plt.xlabel("Date")
 plt.ylabel("Oil Rate")
 plt.legend()
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
 
-plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_standard_loss_ratio_forecast_test_data.png"
+plot_path = "/home/rian/python_project/myvenv/dca_ml/Images/rf_decline_rate_exact_forecast.png"
 plt.savefig(plot_path, dpi=200, bbox_inches="tight")
 
-
-forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_standard_loss_ratio_forecast_test_data.csv"
+forecast_path = "/home/rian/python_project/myvenv/dca_ml/data/rf_decline_rate_exact_forecast.csv"
 forecast_df.to_csv(forecast_path, index=False)
 
 print(f"\nSaved plot to: {plot_path}")

@@ -96,7 +96,7 @@ y_test = y[split:]
 # 4. Train Random Forest
 # =====================================================
 rf = RandomForestRegressor(
-    n_estimators=800,
+    n_estimators=120,
     max_depth=8,
     min_samples_leaf=5,
     random_state=42,
