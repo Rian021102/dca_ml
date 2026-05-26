@@ -25,17 +25,24 @@ def main():
         df["t"] = (df["TEST_DATE"] - df["TEST_DATE"].iloc[0]).dt.days
         q = df["OIL_SMOOTH"].values.astype(float)
 
+        stop_threshold = st.number_input(
+            "Forecast stop threshold (OIL)",
+            min_value=0.0,
+            value=0.0,
+            step=0.1,
+            help="Forecast stops when predicted OIL is less than or equal to this value.",
+        )
+
         st.write("Data loaded successfully. Running models...")
 
         # Run the three RF models
-        forecast_dcalike = run_dcalike_model(df, q)
-        forecast_decline_rate = run_rf_decline_rate_model(df, q)
-        forecast_loss_ratio = run_rf_loss_ratio_model(df, q)
+        forecast_dcalike = run_dcalike_model(df, q, oil_zero_threshold=stop_threshold)
+        forecast_decline_rate = run_rf_decline_rate_model(df, q, oil_zero_threshold=stop_threshold)
+        forecast_loss_ratio = run_rf_loss_ratio_model(df, q, oil_zero_threshold=stop_threshold)
 
         # Clip to zero
-        threshold = 0.1
         def clip_to_zero(forecast):
-            return np.where(forecast < threshold, 0, forecast)
+            return np.where(forecast <= stop_threshold, 0, forecast)
 
         f_dcalike = clip_to_zero(forecast_dcalike)
         f_decline = clip_to_zero(forecast_decline_rate)
@@ -56,12 +63,20 @@ def main():
         plt.plot(dates, q, label="Historical (Smoothed)", color="black", linewidth=2)
         
         last_date = df["TEST_DATE"].iloc[-1]
-        forecast_horizon = 1000
-        forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_horizon, freq="D")
-        
-        plt.plot(forecast_dates, f_dcalike, label="DCALike Forecast", linestyle="--")
-        plt.plot(forecast_dates, f_decline, label="RF Decline Rate Forecast", linestyle="--")
-        plt.plot(forecast_dates, f_loss, label="RF Loss Ratio Forecast", linestyle="--")
+
+        forecast_dates_dcalike = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), periods=len(f_dcalike), freq="D"
+        )
+        forecast_dates_decline = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), periods=len(f_decline), freq="D"
+        )
+        forecast_dates_loss = pd.date_range(
+            start=last_date + pd.Timedelta(days=1), periods=len(f_loss), freq="D"
+        )
+
+        plt.plot(forecast_dates_dcalike, f_dcalike, label="DCALike Forecast", linestyle="--")
+        plt.plot(forecast_dates_decline, f_decline, label="RF Decline Rate Forecast", linestyle="--")
+        plt.plot(forecast_dates_loss, f_loss, label="RF Loss Ratio Forecast", linestyle="--")
         
         plt.title("Comparison of RF-based DCA Forecasts with Actual Dates")
         plt.xlabel("Date")

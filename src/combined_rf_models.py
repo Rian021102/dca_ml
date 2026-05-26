@@ -46,7 +46,7 @@ def build_features(q_series, idx):
 
     return features
 
-def run_dcalike_model(df, q):
+def run_dcalike_model(df, q, oil_zero_threshold=0.0):
     """
     Implementation of the dcalike.py logic:
     Predicts log(q_{i+1}/q_i) using Random Forest.
@@ -74,6 +74,7 @@ def run_dcalike_model(df, q):
     # Forecast
     forecast_horizon = 1000
     future_q_rf = list(q.copy())
+    forecast_values = []
     
     recent_log_declines = np.diff(np.log(np.clip(q[-30:], 1e-6, None)))
     negative_recent_declines = recent_log_declines[recent_log_declines < 0]
@@ -87,11 +88,16 @@ def run_dcalike_model(df, q):
         if terminal_decline < 0:
             predicted_log_decline = 0.7 * predicted_log_decline + 0.3 * terminal_decline
         predicted_log_decline = np.clip(predicted_log_decline, -0.05, -1e-5)
-        future_q_rf.append(future_q_rf[-1] * np.exp(predicted_log_decline))
+        next_q = future_q_rf[-1] * np.exp(predicted_log_decline)
+        if next_q <= oil_zero_threshold:
+            forecast_values.append(0.0)
+            break
+        forecast_values.append(next_q)
+        future_q_rf.append(next_q)
 
-    return np.array(future_q_rf[-forecast_horizon:])
+    return np.array(forecast_values)
 
-def run_rf_decline_rate_model(df, q):
+def run_rf_decline_rate_model(df, q, oil_zero_threshold=0.0):
     """
     Implementation of rf_decline_rate_exact.py logic:
     Predicts nominal decline rate D = -(dq/dt)/q and uses exact exponential stepping.
@@ -121,6 +127,7 @@ def run_rf_decline_rate_model(df, q):
     # Forecast
     forecast_horizon = 1000
     future_q = list(q.copy())
+    forecast_values = []
     
     recent_D = []
     for i in range(max(1, len(q) - 30), len(q) - 1):
@@ -137,11 +144,16 @@ def run_rf_decline_rate_model(df, q):
         predicted_D = max(float(rf_D.predict(X_future)[0]), 0.0)
         predicted_D = 0.7 * predicted_D + 0.3 * terminal_D
         predicted_D = np.clip(predicted_D, 1e-5, 0.05)
-        future_q.append(future_q[-1] * np.exp(-predicted_D))
+        next_q = future_q[-1] * np.exp(-predicted_D)
+        if next_q <= oil_zero_threshold:
+            forecast_values.append(0.0)
+            break
+        forecast_values.append(next_q)
+        future_q.append(next_q)
 
-    return np.array(future_q[-forecast_horizon:])
+    return np.array(forecast_values)
 
-def run_rf_loss_ratio_model(df, q):
+def run_rf_loss_ratio_model(df, q, oil_zero_threshold=0.0):
     """
     Implementation of rf_loss_ratio_exact.py logic:
     Predicts Loss Ratio LR = q / (-dq/dt) and uses exact exponential stepping.
@@ -176,6 +188,7 @@ def run_rf_loss_ratio_model(df, q):
     # Forecast (Simplified recursive implementation based on the provided logic)
     forecast_horizon = 1000
     future_q = list(q.copy())
+    forecast_values = []
     
     for step in range(forecast_horizon):
         idx = len(future_q) - 1
@@ -185,6 +198,11 @@ def run_rf_loss_ratio_model(df, q):
         pred_lr = float(rf_lr.predict(X_future)[0])
         pred_lr = np.clip(pred_lr, lr_low, lr_high)
         # q_next = q * exp(-dt / LR), dt = 1 day
-        future_q.append(future_q[-1] * np.exp(-1.0 / pred_lr))
+        next_q = future_q[-1] * np.exp(-1.0 / pred_lr)
+        if next_q <= oil_zero_threshold:
+            forecast_values.append(0.0)
+            break
+        forecast_values.append(next_q)
+        future_q.append(next_q)
 
-    return np.array(future_q[-forecast_horizon:])
+    return np.array(forecast_values)
