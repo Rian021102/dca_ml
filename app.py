@@ -5,7 +5,7 @@ import io
 import os
 from datetime import datetime
 from src.datautils import load_data
-from src.dcamodel import run_dca_pipeline
+from src.newmodel import run_dca_pipeline
 from src.exponent import exponential_with_uncertainty
 import plotly.graph_objects as go
 
